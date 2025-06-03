@@ -1,0 +1,14 @@
+dataset/CNRDv1.0/*
+dataset/solar/*
+dataset/traffic/*
+dataset/m4/*
+checkpoints/*
+__MACOSX/
+dataset/
+checkpoints/
+*.pth
+*.csv
+*.npz
+*.nc
+*.txt
+
