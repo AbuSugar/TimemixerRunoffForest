@@ -1,6 +1,6 @@
 from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom, Dataset_M4, PSMSegLoader, \
     MSLSegLoader, SMAPSegLoader, SMDSegLoader, SWATSegLoader, UEAloader, Dataset_PEMS, \
-    Dataset_Solar
+    Dataset_Solar, Dataset_Hydrology
 from data_provider.uea import collate_fn
 from torch.utils.data import DataLoader
 
@@ -19,12 +19,15 @@ data_dict = {
     'UEA': UEAloader,
     'PEMS': Dataset_PEMS,
     'Solar': Dataset_Solar,
+    'Hydrology': Dataset_Hydrology, # <-- 添加你的数据集名称和对应的类
 }
 
 
 def data_provider(args, flag):
     Data = data_dict[args.data]
     timeenc = 0 if args.embed != 'timeF' else 1
+
+
 
     if flag == 'test':
         shuffle_flag = False
@@ -86,6 +89,7 @@ def data_provider(args, flag):
             seasonal_patterns=args.seasonal_patterns
         )
         print(flag, len(data_set))
+        # 数据加载
         data_loader = DataLoader(
             data_set,
             batch_size=batch_size,
@@ -93,3 +97,4 @@ def data_provider(args, flag):
             num_workers=args.num_workers,
             drop_last=drop_last)
         return data_set, data_loader
+

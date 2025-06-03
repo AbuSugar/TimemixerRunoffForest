@@ -77,7 +77,8 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 f_dim = -1 if self.args.features == 'MS' else 0
 
                 pred = outputs.detach()
-                true = batch_y.detach()
+                true = batch_y[:, -self.args.pred_len:, f_dim:]  # 裁剪真实目标序列
+                # true = batch_y.detach()
 
                 if self.args.data == 'PEMS':
                     B, T, C = pred.shape
@@ -133,9 +134,16 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 iter_count += 1
                 model_optim.zero_grad()
 
+                # 打印输入数据的维度信息
+                if i == 0:
+                    print(f"\nInput shapes at epoch {epoch + 1}:")
+                    print(f"batch_x shape: {batch_x.shape}")
+                    print(f"batch_y shape: {batch_y.shape}")
+                    print(f"batch_x_mark shape: {batch_x_mark.shape}")
+                    print(f"batch_y_mark shape: {batch_y_mark.shape}")
+
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float().to(self.device)
-
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
@@ -143,6 +151,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     batch_x_mark = None
                     batch_y_mark = None
 
+                # 修改解码器输入的处理
                 if self.args.down_sampling_layers == 0:
                     dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                     dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
@@ -157,9 +166,17 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         else:
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
+                        # 确保维度匹配
                         f_dim = -1 if self.args.features == 'MS' else 0
                         outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                        batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                        batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
+
+                        # 打印维度信息（仅在每个epoch的第一个batch）
+                        if i == 0:
+                            print(f"After processing at epoch {epoch + 1}:")
+                            print(f"outputs shape: {outputs.shape}")
+                            print(f"target shape: {batch_y.shape}")
+
                         loss = criterion(outputs, batch_y)
                         train_loss.append(loss.item())
                 else:
@@ -168,7 +185,16 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     else:
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
+                    # 确保维度匹配
                     f_dim = -1 if self.args.features == 'MS' else 0
+                    outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
+
+                    # 打印维度信息（仅在每个epoch的第一个batch）
+                    if i == 0:
+                        print(f"After processing at epoch {epoch + 1}:")
+                        print(f"outputs shape: {outputs.shape}")
+                        print(f"target shape: {batch_y.shape}")
 
                     loss = criterion(outputs, batch_y)
                     train_loss.append(loss.item())
@@ -283,6 +309,9 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         preds = np.concatenate(preds, axis=0)
         trues = np.concatenate(trues, axis=0)
         print('test shape:', preds.shape, trues.shape)
+
+        trues = trues[:, -self.args.pred_len:, :]  # 裁剪真实序列到预测长度
+        
         preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
         trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
         print('test shape:', preds.shape, trues.shape)

@@ -2,15 +2,15 @@ import os
 import torch
 from models import TimeMixer
 
-
+# 这是一个基类， 为具体的任务提供一个模板
 class Exp_Basic(object):
     def __init__(self, args):
-        self.args = args
+        self.args = args # 参数， 保存命令行或者配置参数
         self.model_dict = {
             'TimeMixer': TimeMixer,
-        }
-        self.device = self._acquire_device()
-        self.model = self._build_model().to(self.device)
+        } # 模型名称与类的映射
+        self.device = self._acquire_device() # 自动选择设备
+        self.model = self._build_model().to(self.device) # 构建模型并迁移到设备上
 
     def _build_model(self):
         raise NotImplementedError

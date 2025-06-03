@@ -17,10 +17,13 @@ warnings.filterwarnings('ignore')
 
 
 class Exp_Imputation(Exp_Basic):
+    # 用于处理时间序列数据的缺失值
     def __init__(self, args):
+        # 初始化， 调用父类exp_basic的初始化方法， 传入命令行参数args， 初始实验环境
         super(Exp_Imputation, self).__init__(args)
 
     def _build_model(self):
+        # 模型构建， 根据args.model参数选择模型
         model = self.model_dict[self.args.model].Model(self.args).float()
 
         if self.args.use_multi_gpu and self.args.use_gpu:
@@ -28,6 +31,9 @@ class Exp_Imputation(Exp_Basic):
         return model
 
     def _get_data(self, flag):
+        # 数据加载 调用data_provider函数， 传入args和flag参数
+        # flag: train, val, test
+        # 加载制定模式（train， val， test）的数据集和数据加载器
         data_set, data_loader = data_provider(self.args, flag)
         return data_set, data_loader
 

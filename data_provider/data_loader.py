@@ -1,15 +1,18 @@
 import os
+# from _ast import pattern
+
 import numpy as np
 import pandas as pd
 import glob
 import re
 import torch
-from sktime.datasets import load_from_tsfile_to_dataframe
+from sktime.datasets.base import load_from_tsfile_to_dataframe
+
 from torch.utils.data import Dataset
 from sklearn.preprocessing import StandardScaler
 from utils.timefeatures import time_features
 from data_provider.m4 import M4Dataset, M4Meta
-from data_provider.uea import Normalizer, interpolate_missing
+from data_provider.uea import Normalizer, interpolate_missing, subsample
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -863,6 +866,130 @@ class Dataset_Solar(Dataset):
         seq_y_mark = torch.zeros((seq_y.shape[0], 1))
 
         return seq_x, seq_y, seq_x_mark, seq_x_mark
+
+    def __len__(self):
+        return len(self.data_x) - self.seq_len - self.pred_len + 1
+
+    def inverse_transform(self, data):
+        return self.scaler.inverse_transform(data)
+
+
+# 水文预测
+class Dataset_Hydrology(Dataset):
+    def __init__(self, root_path, flag='train', size=None,
+                 features='M', data_path='merged_monthly_hydrological_data.csv',
+                 target='Runoff', scale=True, timeenc=0, freq='m', seasonal_patterns=None):
+        # info
+        if size is None:
+            self.seq_len = 12 * 4  # 过去4年的月数据
+            self.label_len = 12    # 用作 decoder 的输入
+            self.pred_len = 12     # 预测未来12个月
+        else:
+            self.seq_len = size[0]
+            self.label_len = size[1]
+            self.pred_len = size[2]
+
+        assert flag in ['train', 'test', 'val']
+        type_map = {'train': 0, 'val': 1, 'test': 2}
+        self.set_type = type_map[flag]
+
+        self.features = features
+        self.target = target
+        self.scale = scale
+        self.timeenc = timeenc
+        self.freq = freq
+
+        self.root_path = root_path
+        self.data_path = data_path
+        self.seasonal_patterns = seasonal_patterns
+
+        self.__read_data__()
+
+    def __read_data__(self):
+        self.scaler = StandardScaler()
+
+        print(f"尝试从路径加载数据: {os.path.join(self.root_path, self.data_path)}")
+        try:
+            df_raw = pd.read_csv(os.path.join(self.root_path, self.data_path))
+            print(f"原始数据 df_raw 加载成功，形状: {df_raw.shape}")
+            print("df_raw 头部:\n", df_raw.head())
+        except Exception as e:
+            print(f"加载原始数据时出错: {e}")
+            raise
+
+        # 处理时间列
+        if 'DATE' in df_raw.columns:
+            df_raw.rename(columns={'DATE': 'date'}, inplace=True)
+
+        print("尝试转换为日期类型...")
+        df_raw['date'] = pd.to_datetime(df_raw['date'])
+        print("日期列转换完成。")
+
+        # 删除 STATION 列
+        if 'STATION' in df_raw.columns:
+            print("检测到 'STATION' 列，尝试删除...")
+            df_raw.drop(columns=['STATION'], inplace=True)
+
+        # 重新排序列，确保 target 在最后
+        cols = list(df_raw.columns)
+        if self.target in cols:
+            cols.remove(self.target)
+            cols.remove('date')
+            df_raw = df_raw[['date'] + cols + [self.target]]
+        else:
+            cols.remove('date')
+            df_raw = df_raw[['date'] + cols]
+
+        # 数据划分
+        num_total = len(df_raw)
+        num_train = int(num_total * 0.7)
+        num_vali = int(num_total * 0.2)
+        num_test = num_total - num_train - num_vali
+
+        border1s = [0, num_train - self.seq_len, num_total - num_test - self.seq_len]
+        border2s = [num_train, num_train + num_vali, num_total]
+        border1 = border1s[self.set_type]
+        border2 = border2s[self.set_type]
+
+        # 获取数据部分
+        if self.features == 'M' or self.features == 'MS':
+            cols_data = [col for col in df_raw.columns if col != 'date']
+            df_data = df_raw[cols_data]
+        elif self.features == 'S':
+            df_data = df_raw[[self.target]]
+
+        if self.scale:
+            train_data = df_data[border1s[0]:border2s[0]]
+            if train_data.empty:
+                raise ValueError("训练集为空，无法拟合标准化器")
+            self.scaler.fit(train_data.values)
+            data = self.scaler.transform(df_data.values)
+        else:
+            data = df_data.values
+
+        df_stamp = df_raw[['date']][border1:border2]
+        data_stamp = time_features(pd.to_datetime(df_stamp['date'].values), freq=self.freq)
+        data_stamp = data_stamp.transpose(1, 0)
+
+        self.data_x = data[border1:border2]
+        self.data_y = data[border1:border2]
+        self.data_stamp = data_stamp
+
+        if self.data_x.size == 0 or self.data_y.size == 0 or self.data_stamp.size == 0:
+            raise ValueError("最终数据为空，检查数据集划分或长度设置")
+
+    def __getitem__(self, index):
+        s_begin = index
+        s_end = s_begin + self.seq_len
+        r_begin = s_end - self.label_len
+        r_end = r_begin + self.label_len + self.pred_len
+
+        seq_x = self.data_x[s_begin:s_end]
+        seq_y = self.data_y[r_begin:r_end]
+        seq_x_mark = self.data_stamp[s_begin:s_end]
+        seq_y_mark = self.data_stamp[r_begin:r_end]
+
+        return seq_x, seq_y, seq_x_mark, seq_y_mark
 
     def __len__(self):
         return len(self.data_x) - self.seq_len - self.pred_len + 1

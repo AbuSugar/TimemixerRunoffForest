@@ -18,6 +18,8 @@ class my_Layernorm(nn.Module):
         return x_hat - bias
 
 
+# 在 TimeMixer/layers/Autoformer_EncDec.py 文件中，找到 moving_avg 类
+
 class moving_avg(nn.Module):
     """
     Moving average block to highlight the trend of time series
@@ -26,21 +28,35 @@ class moving_avg(nn.Module):
     def __init__(self, kernel_size, stride):
         super(moving_avg, self).__init__()
         self.kernel_size = kernel_size
+        # 保持 AvgPool1d 的 padding 为 0，我们将通过手动填充来控制长度
         self.avg = nn.AvgPool1d(kernel_size=kernel_size, stride=stride, padding=0)
 
     def forward(self, x):
-        # padding on the both ends of time series
-        front = x[:, 0:1, :].repeat(1, (self.kernel_size - 1) // 2, 1)
-        end = x[:, -1:, :].repeat(1, (self.kernel_size - 1) // 2, 1)
-        x = torch.cat([front, x, end], dim=1)
-        x = self.avg(x.permute(0, 2, 1))
-        x = x.permute(0, 2, 1)
+        # 动态计算左右两侧的填充量
+        # 确保总填充量为 kernel_size - 1，这样 AvgPool1d 后的长度能保持不变
+        # 对于奇数 kernel_size，这是对称的
+        # 对于偶数 kernel_size，这将是稍微不对称的，但能保证长度
+        pad_left = (self.kernel_size - 1) // 2
+        pad_right = self.kernel_size - 1 - pad_left
+
+        # 应用填充
+        front = x[:, 0:1, :].repeat(1, pad_left, 1)
+        end = x[:, -1:, :].repeat(1, pad_right, 1)  # 修改了这里的填充量
+        x = torch.cat([front, x, end], dim=1)  #
+
+        # 调整 x 的维度以适应 AvgPool1d (AvgPool1d 期望 (N, C, L))
+        x = self.avg(x.permute(0, 2, 1))  #
+
+        # 恢复原始维度 (B, L, C)
+        x = x.permute(0, 2, 1)  #
         return x
 
 
 class series_decomp(nn.Module):
     """
     Series decomposition block
+    用传统的decomposition操作可以将序列分解为trend-cyclical和seasonal parts这两个部分，
+    这两个部分我的理解是一个可以反应短期的波动另一个则反应长期的季节性。
     """
 
     def __init__(self, kernel_size):
