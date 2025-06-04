@@ -1,7 +1,9 @@
-from torch.optim import lr_scheduler
+# File: exp/exp_long_term_forecasting.py
 
+from torch.optim import lr_scheduler
 from data_provider.data_factory import data_provider
 from exp.exp_basic import Exp_Basic
+from log_experiment import log_experiment_results
 from utils.tools import EarlyStopping, adjust_learning_rate, visual, save_to_csv, visual_weights
 from utils.metrics import metric
 import torch
@@ -11,6 +13,10 @@ import os
 import time
 import warnings
 import numpy as np
+from models import TimeMixer
+# DLinear, NLinear, PatchTST, Transformer, ETSformer, FEDformer, Autoformer, Informer, Flowformer, Reformer, SegRNN,
+# StemGNN,  TimesNet, SCINet, PredNet, Koopa
+# 确保所有模型都被导入
 
 warnings.filterwarnings('ignore')
 
@@ -20,7 +26,31 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         super(Exp_Long_Term_Forecast, self).__init__(args)
 
     def _build_model(self):
-        model = self.model_dict[self.args.model].Model(self.args).float()
+        # 确保这里 model_dict 被正确定义，通常在 Exp_Basic 中
+        model_dict = {
+            'TimeMixer': TimeMixer,
+            # 'Autoformer': Autoformer,
+            # 'Transformer': Transformer,
+            # 'Informer': Informer,
+            # 'DLinear': DLinear,
+            # 'NLinear': NLinear,
+            # 'PatchTST': PatchTST,
+            # 'FEDformer': FEDformer,
+            # 'ETSformer': ETSformer,
+            # 'Flowformer': Flowformer,
+            # 'Reformer': Reformer,
+            # 'SegRNN': SegRNN,
+            # 'StemGNN': StemGNN,
+            # 'TimesNet': TimesNet,
+            # 'SCINet': SCINet,
+            # 'PredNet': PredNet,
+            # 'Koopa': Koopa
+        }
+        if self.args.model in model_dict.keys():
+            model = model_dict[self.args.model].Model(self.args).float()
+        else:
+            # 默认值，如果模型不在列表中
+            model = TimeMixer.Model(self.args).float()
 
         if self.args.use_multi_gpu and self.args.use_gpu:
             model = nn.DataParallel(model, device_ids=self.args.device_ids)
@@ -47,7 +77,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         with torch.no_grad():
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(vali_loader):
                 batch_x = batch_x.float().to(self.device)
-                batch_y = batch_y.float().to(self.device)
+                batch_y = batch_y.float().to(self.device)  # 确保 batch_y 也在 GPU 上
 
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
@@ -77,8 +107,8 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 f_dim = -1 if self.args.features == 'MS' else 0
 
                 pred = outputs.detach()
-                true = batch_y[:, -self.args.pred_len:, f_dim:]  # 裁剪真实目标序列
-                # true = batch_y.detach()
+                # 修正 vali 阶段的真实目标裁剪，使其与训练阶段一致
+                true = batch_y[:, -self.args.pred_len:, f_dim:]  # <-- 修改点 5：裁剪真实目标序列
 
                 if self.args.data == 'PEMS':
                     B, T, C = pred.shape
@@ -109,7 +139,8 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         time_now = time.time()
 
         train_steps = len(train_loader)
-        early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
+        early_stopping = EarlyStopping(patience=self.args.patience, verbose=True,
+                                       setting=setting)  # <-- 修改点 4：传入 setting
 
         model_optim = self._select_optimizer()
         criterion = self._select_criterion()
@@ -134,7 +165,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 iter_count += 1
                 model_optim.zero_grad()
 
-                # 打印输入数据的维度信息
+                # 打印输入数据的维度信息（仅在每个epoch的第一个batch）
                 if i == 0:
                     print(f"\nInput shapes at epoch {epoch + 1}:")
                     print(f"batch_x shape: {batch_x.shape}")
@@ -169,7 +200,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         # 确保维度匹配
                         f_dim = -1 if self.args.features == 'MS' else 0
                         outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                        batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
+                        batch_y = batch_y[:, -self.args.pred_len:, f_dim:]  # <-- 确保真实目标也裁剪
 
                         # 打印维度信息（仅在每个epoch的第一个batch）
                         if i == 0:
@@ -188,7 +219,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     # 确保维度匹配
                     f_dim = -1 if self.args.features == 'MS' else 0
                     outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
+                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:]  # <-- 确保真实目标也裁剪
 
                     # 打印维度信息（仅在每个epoch的第一个batch）
                     if i == 0:
@@ -236,7 +267,8 @@ class Exp_Long_Term_Forecast(Exp_Basic):
             else:
                 print('Updating learning rate to {}'.format(scheduler.get_last_lr()[0]))
 
-        best_model_path = path + '/' + 'checkpoint.pth'
+        # 此处加载的检查点文件名应与 EarlyStopping 保存的一致
+        best_model_path = os.path.join(path, 'checkpoint.pth')  # <-- 确认这里是这样
         self.model.load_state_dict(torch.load(best_model_path))
 
         return self.model
@@ -245,7 +277,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         test_data, test_loader = self._get_data(flag='test')
         if test:
             print('loading model')
-            self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
+            # 这里的加载逻辑也应该与 run.py 中新代码块的逻辑保持一致，
+            # 或者直接加载 'setting_checkpoint.pth'
+            self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'))) # <-- 确认这里是这样
+
 
         checkpoints_path = './checkpoints/' + setting + '/'
         preds = []
@@ -258,7 +293,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         with torch.no_grad():
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(test_loader):
                 batch_x = batch_x.float().to(self.device)
-                batch_y = batch_y.float().to(self.device)
+                batch_y = batch_y.float().to(self.device)  # 确保 batch_y 也在 GPU 上
 
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
@@ -289,6 +324,9 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
                 f_dim = -1 if self.args.features == 'MS' else 0
 
+                outputs = outputs[:, -self.args.pred_len:, f_dim:]  # <-- 确保输出裁剪到预测长度和特征维度
+                batch_y = batch_y[:, -self.args.pred_len:, f_dim:]  # <-- 确保真实目标也裁剪到预测长度和特征维度
+
                 outputs = outputs.detach().cpu().numpy()
                 batch_y = batch_y.detach().cpu().numpy()
 
@@ -309,9 +347,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         preds = np.concatenate(preds, axis=0)
         trues = np.concatenate(trues, axis=0)
         print('test shape:', preds.shape, trues.shape)
-
-        trues = trues[:, -self.args.pred_len:, :]  # 裁剪真实序列到预测长度
-        
+        # trues = trues[:, -self.args.pred_len:, :]  # 这一行应该移到上面拼接之前或者确保数据已经裁剪好
         preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
         trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
         print('test shape:', preds.shape, trues.shape)
@@ -325,10 +361,41 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         folder_path = './results/' + setting + '/'
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
+            # 根据 self.args.freq 确定 seasonality
 
-        mae, mse, rmse, mape, mspe = metric(preds, trues)
-        print('mse:{}, mae:{}'.format(mse, mae))
-        print('rmse:{}, mape:{}, mspe:{}'.format(rmse, mape, mspe))
+        if 'm' in self.args.freq:
+            current_seasonality = 12
+        elif 'h' in self.args.freq:
+            current_seasonality = 24
+        elif 'd' in self.args.freq:
+            current_seasonality = 7  # 或 365，取决于您的日度数据的季节性模式
+        else:
+            current_seasonality = 1  # 默认值
+
+        # 修改这里，接收所有的 10 个返回值
+        mae, mse, rmse, mape, mspe, rse, corr, r2, mase, smape = metric(preds, trues,
+                                                                        seasonality=current_seasonality)
+
+        # 打印这些指标（这部分可能已经在您的代码中了，但请确保所有10个都被打印出来）
+        print(
+            'mse:{:.4f}, mae:{:.4f}, rmse:{:.4f}, mape:{:.4f}, mspe:{:.4f}, rse:{:.4f}, corr:{:.4f}, r2:{:.4f}, mase:{:.4f}, smape:{:.4f}'.format(
+                mse, mae, rmse, mape, mspe, rse, corr, r2, mase, smape))
+
+        metrics_dict = {
+            'mse': mse,
+            'mae': mae,
+            'rmse': rmse,
+            'mape': mape,
+            'mspe': mspe,
+            'rse': rse,
+            'corr': corr,
+            'r2': r2,
+            'mase': mase,
+            'smape': smape
+        }
+
+        # 调用函数记录结果
+        log_experiment_results(self.args, metrics_dict)  # self.args
 
         f = open("result_long_term_forecast.txt", 'a')
         f.write(setting + "  \n")
@@ -344,3 +411,53 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         np.save(folder_path + 'pred.npy', preds)
         np.save(folder_path + 'true.npy', trues)
         return
+
+    def predict(self, setting, load=False):
+        # ... (此部分代码保持不变，与您仓库中的原代码一致)
+        pred_data, pred_loader = self._get_data(flag='pred')
+
+        if load:
+            path = os.path.join(self.args.checkpoints, setting)
+            # 这里也应该统一加载名称
+            best_model_path = os.path.join(path, setting + '_checkpoint.pth')  # <-- 建议统一加载名称
+            self.model.load_state_dict(torch.load(best_model_path))
+
+        preds = []
+        self.model.eval()
+        with torch.no_grad():
+            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(pred_loader):
+                batch_x = batch_x.float().to(self.device)
+                batch_y = batch_y.float()
+                batch_x_mark = batch_x_mark.float().to(self.device)
+                batch_y_mark = batch_y_mark.float().to(self.device)
+
+                # Decoder input
+                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+                dec_inp = torch.cat([batch_y[:, self.args.label_len - self.args.pred_len:self.args.label_len, :],
+                                     dec_inp], dim=1).float().to(self.device)
+                # encoder - decoder
+                if self.args.use_amp:
+                    with torch.cuda.amp.autocast():
+                        if self.args.output_attention:
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+                        else:
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                else:
+                    if self.args.output_attention:
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+                    else:
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                f_dim = -1 if self.args.features == 'MS' else 0
+                outputs = outputs[:, -self.args.pred_len:, f_dim:]  # <-- 确保输出裁剪
+                outputs = outputs.detach().cpu().numpy()
+                if self.args.inverse:
+                    outputs = pred_data.inverse_transform(outputs)
+                preds.append(outputs)
+        preds = np.array(preds)
+        preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
+        # result save
+        folder_path = './results/' + setting + '/'
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+        np.save(folder_path + 'real_prediction.npy', preds)
+        return preds

@@ -4,7 +4,7 @@ import torch
 import pandas as pd
 import numpy as np
 import random
-import glob  # 导入 glob 模块用于文件查找
+import glob
 
 # 从你的 TimeMixer 项目中导入必要的模块
 from exp.exp_anomaly_detection import Exp_Anomaly_Detection
@@ -12,10 +12,10 @@ from exp.exp_classification import Exp_Classification
 from exp.exp_imputation import Exp_Imputation
 from exp.exp_long_term_forecasting import Exp_Long_Term_Forecast
 from exp.exp_short_term_forecasting import Exp_Short_Term_Forecast
-from data_provider.data_factory import data_provider  # 导入数据提供函数
-from utils.metrics import metric  # 导入评估指标函数
+from data_provider.data_factory import data_provider
+from utils.metrics import metric # 确保这里导入的是已修改过的 metric 函数
 
-# --- （你的 argparse 参数定义部分，与 run.py 中完全一致） ---
+# --- Argparse 参数定义 ---
 parser = argparse.ArgumentParser(description='TimeMixer')
 # basic config
 parser.add_argument('--task_name', type=str, required=True, default='long_term_forecast',
@@ -113,9 +113,8 @@ parser.add_argument('--p_hidden_dims', type=int, nargs='+', default=[128, 128],
                     help='hidden layer dimensions of projector (List)')
 parser.add_argument('--p_hidden_layers', type=int, default=2, help='number of hidden layers in projector')
 
-# --- （以下是你 run.py 中 if __name__ == '__main__': 的内容） ---
 if __name__ == '__main__':
-    # 固定随机种子 (保持不变)
+    # 固定随机种子
     fix_seed = 2021
     random.seed(fix_seed)
     torch.manual_seed(fix_seed)
@@ -131,7 +130,7 @@ if __name__ == '__main__':
         args.device_ids = [int(id_) for id_ in device_ids]
         args.gpu = args.device_ids[0]
 
-    # 动态计算 enc_in, dec_in, c_out (保持不变)
+    # 动态计算 enc_in, dec_in, c_out
     try:
         temp_df = pd.read_csv(os.path.join(args.root_path, args.data_path))
         if 'DATE' in temp_df.columns:
@@ -160,7 +159,7 @@ if __name__ == '__main__':
     print('Args in experiment:')
     print(args)
 
-    # 选择实验类 (保持不变)
+    # 选择实验类
     if args.task_name == 'long_term_forecast':
         Exp = Exp_Long_Term_Forecast
     elif args.task_name == 'short_term_forecast':
@@ -179,7 +178,6 @@ if __name__ == '__main__':
         for ii in range(args.itr):
             # setting record of experiments
             setting = '{}_{}_{}_{}_{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}'.format(
-                # 添加了ll for label_len
                 args.task_name,
                 args.model_id,
                 args.comment,
@@ -198,17 +196,18 @@ if __name__ == '__main__':
                 args.distil,
                 args.des, ii)
 
-            print(f"Current training setting: {setting}")  # <-- 添加这一行，打印出本次训练的 setting
+            print(f"Current training setting: {setting}")
 
             exp = Exp(args)  # set experiments
             print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
             exp.train(setting)  # 训练模型
 
             print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
+            # 假设 exp.test 方法内部已经修改，可以正确处理 seasonality 参数
             exp.test(setting)  # 在训练结束后立即进行测试集评估
             torch.cuda.empty_cache()
     else:
-        # 如果 is_training 为 0，则仅进行测试 (保持不变)
+        # 如果 is_training 为 0，则仅进行测试
         ii = 0
         setting = '{}_{}_{}_{}_{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}'.format(
             args.task_name,
@@ -238,50 +237,33 @@ if __name__ == '__main__':
     print('\n>>>>>>> Re-evaluating best model on Validation Set <<<<<<<<<')
     try:
         # 重新初始化 Exp 类，但这次的目的是加载模型
-        eval_exp = Exp(args)  # 创建一个新的实验实例
+        eval_exp = Exp(args)
 
         # 设置 is_training 为 False，以便 _get_data 获取验证集数据
-        # 临时创建用于数据加载的 args 对象，不修改原 args
-        temp_args_eval = argparse.Namespace(**vars(args))  # 复制 args 的所有属性
+        temp_args_eval = argparse.Namespace(**vars(args))
         temp_args_eval.is_training = 0
 
-        # 获取验证集数据加载器，注意这里 flag='val'
-        val_data, val_loader = data_provider(temp_args_eval, flag='val')  #
-
-        # --------------------------------------------------------------------------
-        # 关键修正：确保这里使用的 setting 与训练时实际保存的模型文件名一致
-        # 最直接的方式是使用训练循环中定义的那个 `setting` 变量
-        # 确保你在 train 循环外部能访问到它，或者重新生成完全一致的 setting
-        # 因为它在循环中定义，所以如果你在循环外使用，需要确保它是最新一次训练的 setting
-        # 简单起见，如果只跑 itr=1 次，可以直接用它。
-        # 如果跑 itr > 1 次，可能需要修改一下逻辑来获取对应 itr 的 setting。
-        # 这里假设只跑 itr=1，所以直接用当前 setting 变量。
-        # --------------------------------------------------------------------------
+        # 获取验证集数据加载器
+        val_data, val_loader = data_provider(temp_args_eval, flag='val')
 
         # 构建保存模型文件名的路径
-        # TimeMixer 的 train 方法通常会保存为 f'{self.args.checkpoints}/{setting}_checkpoint.pth'
-        # 或者 f'{self.args.checkpoints}/{setting}_best_model.pth'
-        # 检查你的 exp_long_term_forecasting.py 中的 _save_checkpoint 方法确认文件名格式。
-        # 常见的命名是 {setting}_checkpoint.pth
-
-        path_to_best_model = os.path.join(args.checkpoints, setting + '_checkpoint.pth')
+        path_to_best_model = os.path.join(args.checkpoints, setting, 'checkpoint.pth')  # <-- 修改点 1
 
         # 额外的查找逻辑，以防命名略有不同，查找与 setting 匹配的最新文件
         if not os.path.exists(path_to_best_model):
             print(
                 f"Warning: Specific checkpoint '{path_to_best_model}' not found. Searching for any matching checkpoint for setting: {setting}")
-            # 查找所有以当前 setting 开头的 .pth 文件
-            # 注意：glob.glob 路径需要匹配操作系统的斜杠风格
-            search_pattern = os.path.join(args.checkpoints, setting + '*.pth')
+            # 修改搜索模式，使其在 setting 目录下查找 'checkpoint.pth'
+            search_pattern = os.path.join(args.checkpoints, setting, '*.pth')  # <-- 修改点 2：在 setting 目录下搜索
             list_of_files = glob.glob(search_pattern)
 
             if list_of_files:
-                path_to_best_model = max(list_of_files, key=os.path.getctime)  # 获取最新修改的文件
+                path_to_best_model = max(list_of_files, key=os.path.getctime)
                 print(f"Found latest checkpoint: {path_to_best_model}")
             else:
                 raise FileNotFoundError(f"No checkpoint found for setting: {setting} in {args.checkpoints}")
 
-        # 加载最佳模型权重
+            # 加载最佳模型权重
         eval_exp.model.load_state_dict(torch.load(path_to_best_model))
         print(f"Loaded best model from {path_to_best_model}")
 
@@ -291,7 +273,7 @@ if __name__ == '__main__':
         preds = []
         trues = []
 
-        with torch.no_grad():  # 在评估时不计算梯度
+        with torch.no_grad():
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(val_loader):
                 batch_x = batch_x.float().to(eval_exp.device)
                 batch_y = batch_y.float().to(eval_exp.device)
@@ -320,17 +302,28 @@ if __name__ == '__main__':
         trues = np.array(trues)
 
         # 将 preds 和 trues 从 (num_batches, batch_size, ...) 拼接成 (total_samples, ...)
-        # val_loader 的 drop_last 默认为 True，所以每个 batch_size 都是固定的
         preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
         trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
 
         # 只取真实值中对应 pred_len 的部分
         trues_for_eval = trues[:, -eval_exp.args.pred_len:, :]
 
-        # 计算评估指标
-        mae, mse, rmse, mape, mspe = metric(preds, trues_for_eval)  #
+        # 根据 args.freq 确定 seasonality
+        if 'm' in args.freq:
+            current_seasonality = 12
+        elif 'h' in args.freq:
+            current_seasonality = 24
+        elif 'd' in args.freq:
+            current_seasonality = 7 # 请根据您的日度数据实际的季节性（例如周循环、年循环）进行调整
+        else:
+            current_seasonality = 1 # 默认值
+
+        # 计算评估指标，并传入 seasonality
+        mae, mse, rmse, mape, mspe, rse, corr, r2, mase, smape = metric(preds, trues_for_eval, seasonality=current_seasonality)
+
         print(f"Validation Set Evaluation:")
         print(f"MSE: {mse:.4f}, MAE: {mae:.4f}, RMSE: {rmse:.4f}, MAPE: {mape:.4f}, MSPE: {mspe:.4f}")
+        print(f"RSE: {rse:.4f}, CORR: {corr:.4f}, R2: {r2:.4f}, MASE: {mase:.4f}, SMAPE: {smape:.4f}%")
 
     except FileNotFoundError as e:
         print(f"Error: {e}")
@@ -339,5 +332,5 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"An error occurred during re-evaluation: {e}")
 
-    # 最后清空 CUDA 缓存 (保持不变)
+    # 最后清空 CUDA 缓存
     torch.cuda.empty_cache()
